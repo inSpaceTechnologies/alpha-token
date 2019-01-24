@@ -1,3 +1,6 @@
+*.abi
+*.wasm
+
 # Prerequisites
 *.d
 
