@@ -9,15 +9,11 @@
 
 #include <string>
 
-namespace eosiosystem {
-   class system_contract;
-}
-
 namespace eosio {
 
    using std::string;
 
-   class [[eosio::contract("eosio.token")]] token : public contract {
+   class [[eosio::contract("is.protocoin")]] token : public contract {
       public:
          using contract::contract;
 
