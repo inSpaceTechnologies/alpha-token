@@ -6,8 +6,15 @@
 
 #include <eosiolib/asset.hpp>
 #include <eosiolib/eosio.hpp>
+#include <eosiolib/time.hpp>
 
 #include <string>
+
+// time in seconds
+const uint32_t ONE_MINUTE = 60;
+const uint32_t ONE_HOUR = ONE_MINUTE * 60;
+const uint32_t ONE_DAY = ONE_HOUR * 24;
+const uint32_t ONE_YEAR = ONE_DAY * 365;
 
 namespace eosio {
 
@@ -31,6 +38,14 @@ namespace eosio {
 
          [[eosio::action]]
          void close( name owner, const symbol& symbol );
+
+         [[eosio::action]]
+         void addstake( name staker,
+                        asset        quantity,
+                        uint32_t     duration );
+
+         [[eosio::action]]
+         void updatestakes( const symbol& symbol );
 
          static asset get_supply( name token_contract_account, symbol_code sym_code )
          {
@@ -60,8 +75,27 @@ namespace eosio {
             uint64_t primary_key()const { return supply.symbol.code().raw(); }
          };
 
+         struct [[eosio::table]] stake {
+            uint64_t                id; // use available_primary_key() to generate
+            asset                   quantity;
+            eosio::time_point_sec   start;
+            uint32_t                duration;
+
+            uint64_t primary_key()const { return id; }
+         };
+
+         struct [[eosio::table]] stake_stat {
+            name           staker;
+            asset          total_stake;
+            int64_t        stake_weight;
+
+            uint64_t primary_key()const { return staker.value; }
+         };
+
          typedef eosio::multi_index< "accounts"_n, account > accounts;
          typedef eosio::multi_index< "stat"_n, currency_stats > stats;
+         typedef eosio::multi_index< "stakes"_n, stake> stakes;
+         typedef eosio::multi_index< "stakestats"_n, stake_stat> stake_stats;
 
          void issue( asset quantity );
          void sub_balance( name owner, asset value );
@@ -69,6 +103,41 @@ namespace eosio {
 
          // constants
          const float ISSUE_PROPORTION = 0.75; // remainder used for boost
+
+         // staking
+
+         static const size_t stake_count = 5;
+         // short durations for testing
+         // TODO: change to days, not minutes
+         const uint32_t stake_durations[stake_count] = {
+            0,
+            30 * ONE_MINUTE,
+            90 * ONE_MINUTE,
+            180 * ONE_MINUTE,
+            360  * ONE_MINUTE
+         };
+         const uint32_t update_interval = ONE_MINUTE;
+
+         const int64_t stake_weights[stake_count] = {
+            0,
+            5,
+            6,
+            7,
+            10
+         };
+
+         inline int64_t stake_weight( uint32_t stake_duration )
+         {
+            size_t i = 0;
+            while ((i+1) < stake_count && stake_duration >= stake_durations[i+1]) {
+               i = i+1;
+            }
+            return stake_weights[i];
+         }
+
+         asset get_stake( name owner, const symbol& symbol )const;
+         int64_t get_stake_weight( name owner, const symbol& symbol )const;
+         asset get_unstaked_balance( name owner, const symbol& symbol )const;
    };
 
 } /// namespace eosio

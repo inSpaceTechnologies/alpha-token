@@ -4,6 +4,7 @@
  */
 
 #include <is.protocoin/is.protocoin.hpp>
+#include <eosiolib/transaction.hpp>
 
 namespace eosio {
 
@@ -133,6 +134,149 @@ void token::close( name owner, const symbol& symbol )
    acnts.erase( it );
 }
 
+void token::addstake( name         staker,
+                      asset        quantity,
+                      uint32_t     duration )
+{
+    require_auth( staker );
+    eosio_assert( is_account( staker ), "staker account does not exist");
+
+    stats statstable( _self, quantity.symbol.code().raw() );
+    const auto& st = statstable.get( quantity.symbol.code().raw() );
+
+    eosio_assert( quantity.is_valid(), "invalid quantity" );
+    eosio_assert( quantity.amount > 0, "must stake positive quantity" );
+    eosio_assert( quantity.symbol == st.supply.symbol, "symbol precision mismatch" );
+
+    const asset unstaked_balance = get_unstaked_balance(staker, quantity.symbol);
+    eosio_assert( quantity.amount <= unstaked_balance.amount, "overdrawn unstaked balance" );
+
+    stakes staker_stakes( _self, staker.value );
+    staker_stakes.emplace(_self, [&](auto& s) {
+      s.id = staker_stakes.available_primary_key();
+      s.quantity = quantity;
+      s.start = eosio::time_point_sec(now());
+      s.duration = duration;
+   });
+
+   int64_t weight = stake_weight(duration) * quantity.amount;
+
+   stake_stats stake_stats_table( _self, quantity.symbol.code().raw() );
+   const auto staker_stake_stats = stake_stats_table.find( staker.value );
+   if( staker_stake_stats == stake_stats_table.end() ) {
+      stake_stats_table.emplace( _self, [&]( auto& s ){
+         s.staker = staker;
+         s.total_stake = quantity;
+         s.stake_weight = weight;
+      });
+   } else {
+      stake_stats_table.modify( staker_stake_stats, _self, [&]( auto& s ) {
+         s.total_stake += quantity;
+         s.stake_weight += weight;
+      });
+   }
+}
+
+void token::updatestakes( const symbol& symbol ) {
+   require_auth( _self );
+
+   eosio::print("Updating stakes\n");
+
+   stake_stats stake_stats_table( _self, symbol.code().raw() );
+
+   // iterate through stake stats
+   // (all stakes will have an entry because addstake adds one)
+   auto iterator = stake_stats_table.begin();
+   while ( iterator != stake_stats_table.end() ) {
+
+      const auto& st = (*iterator);
+      // iterate through the staker's stakes
+      stakes stakestable( _self, st.staker.value );
+
+      asset total_stake(0, symbol);
+
+      int64_t this_stake_weight = 0;
+
+      const eosio::time_point_sec currentTime(now());
+      auto stake_iterator = stakestable.begin();
+      while(stake_iterator != stakestable.end()) {
+         const auto& stk = (*stake_iterator);
+         if (stk.quantity.symbol != symbol) {
+            ++stake_iterator;
+            continue;
+         }
+         const eosio::time_point_sec expiryTime = stk.start + stk.duration;
+         if (expiryTime <= currentTime) {
+            // stake has expired. remove it.
+            stake_iterator = stakestable.erase(stake_iterator);
+         } else {
+            total_stake.amount += stk.quantity.amount;
+
+            int64_t weight = stake_weight(stk.duration) * stk.quantity.amount;
+            this_stake_weight += weight;
+
+            ++stake_iterator;
+         }
+      }
+
+      if (total_stake.amount == 0) {
+         // all stakes have expired.
+         // remove entry
+         iterator = stake_stats_table.erase(iterator);
+      } else {
+         // update stake stats
+         stake_stats_table.modify( iterator, _self, [&]( auto& s ) {
+            s.total_stake = total_stake;
+            s.stake_weight = this_stake_weight;
+         });
+         ++iterator;
+      }
+   }
+
+   // schedule a transaction to do it again
+   eosio::transaction out;
+   out.actions.emplace_back(
+      permission_level{_self, "active"_n},
+      _self,
+      "updatestakes"_n,
+      std::make_tuple(symbol));
+   out.delay_sec = update_interval;
+   out.send(_self.value + now(), _self); // needs a unique sender id so append current time
+}
+
+
+asset token::get_stake( name staker, const symbol& symbol )const
+{
+   stake_stats stake_stats_table( _self, symbol.code().raw() );
+   const auto staker_stake_stats = stake_stats_table.find( staker.value );
+   if( staker_stake_stats == stake_stats_table.end() ) {
+      // no enty, so no stakes
+      asset ret(0, symbol);
+      return ret;
+   } else {
+      return (*staker_stake_stats).total_stake;
+   }
+}
+
+int64_t token::get_stake_weight( name staker, const symbol& symbol )const
+{
+   stake_stats stake_stats_table( _self, symbol.code().raw() );
+   const auto staker_stake_stats = stake_stats_table.find( staker.value );
+   if( staker_stake_stats == stake_stats_table.end() ) {
+      // no enty, so no stakes
+      return (int64_t)0;
+   } else {
+      return (*staker_stake_stats).stake_weight;
+   }
+}
+
+asset token::get_unstaked_balance( name owner, const symbol& symbol )const
+{
+   const asset balance = get_balance(_self, owner, symbol.code());
+   const asset stake = get_stake(owner, symbol);
+   return asset(balance.amount - stake.amount, symbol);
+}
+
 } /// namespace eosio
 
-EOSIO_DISPATCH( eosio::token, (create)(transfer)(open)(close) )
+EOSIO_DISPATCH( eosio::token, (create)(transfer)(open)(close)(addstake)(updatestakes) )
