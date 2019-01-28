@@ -83,11 +83,28 @@ void token::sub_balance( name owner, asset value ) {
    accounts from_acnts( _self, owner.value );
 
    const auto& from = from_acnts.get( value.symbol.code().raw(), "no balance object found" );
-   eosio_assert( from.balance.amount >= value.amount, "overdrawn balance" );
+
+   const asset stake = get_stake(owner, value.symbol );
+
+   const int64_t transaction_fee_amount = (int64_t)(value.amount * transaction_fee);
+   const int64_t total_amount = value.amount + transaction_fee_amount;
+
+   eosio_assert( from.balance.amount - stake.amount >= total_amount, "overdrawn unstaked balance" );
 
    from_acnts.modify( from, owner, [&]( auto& a ) {
-         a.balance -= value;
+         a.balance.amount -= total_amount;
       });
+
+   int64_t transaction_fee_remaining = transaction_fee_amount;
+   const int64_t transaction_fee_stakers_amount = (int64_t)(transaction_fee_to_stakers * transaction_fee_amount);
+   asset transaction_fee_stakers_asset(transaction_fee_stakers_amount, value.symbol);
+
+   transaction_fee_remaining -= distribute(transaction_fee_stakers_asset);
+
+   if (transaction_fee_remaining > 0) {
+      asset transaction_fee_inspace_asset(transaction_fee_remaining, value.symbol);
+      add_balance(_self, transaction_fee_inspace_asset, _self);
+   }
 }
 
 void token::add_balance( name owner, asset value, name ram_payer )
@@ -275,6 +292,55 @@ asset token::get_unstaked_balance( name owner, const symbol& symbol )const
    const asset balance = get_balance(_self, owner, symbol.code());
    const asset stake = get_stake(owner, symbol);
    return asset(balance.amount - stake.amount, symbol);
+}
+
+// distributes the quantity amongst stakers by stake weight.
+// returns the actual amount distruted.
+int64_t token::distribute( asset quantity )
+{
+   stake_stats stake_stats_table( _self, quantity.symbol.code().raw() );
+
+   std::vector<name>  stakers;
+   std::vector<int64_t>       weights;
+   int64_t                    total_weight = 0;
+
+   // iterate through stake stats
+   auto iterator = stake_stats_table.begin();
+   while ( iterator != stake_stats_table.end() ) {
+
+      const auto& st = (*iterator);
+
+      stakers.push_back(st.staker);
+      weights.push_back(st.stake_weight);
+      total_weight += st.stake_weight;
+
+      ++iterator;
+   }
+
+   if (total_weight == 0) {
+      return 0;
+   }
+
+   int64_t amount_distributed = 0;
+
+   for(size_t i = 0; i < stakers.size(); i++) {
+      name staker = stakers[i];
+
+      int64_t staker_weight = weights[i];
+
+      float proportion = (float)staker_weight / total_weight;
+
+      int64_t amount_for_staker = (int64_t)(quantity.amount  * proportion);
+
+      asset amount_asset;
+      amount_asset.symbol = quantity.symbol;
+      amount_asset.amount = amount_for_staker;
+
+      add_balance( staker, amount_asset, _self);
+      amount_distributed += amount_for_staker;
+   }
+
+   return amount_distributed;
 }
 
 } /// namespace eosio

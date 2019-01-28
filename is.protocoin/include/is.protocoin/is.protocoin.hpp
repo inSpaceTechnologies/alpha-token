@@ -138,6 +138,16 @@ namespace eosio {
          asset get_stake( name owner, const symbol& symbol )const;
          int64_t get_stake_weight( name owner, const symbol& symbol )const;
          asset get_unstaked_balance( name owner, const symbol& symbol )const;
+
+         // transaction fee
+
+         const float transaction_fee = 0.01; // 1%
+         const float transaction_fee_to_stakers = 0.7f; // 70% of the transaction fee
+         // const float transaction_fee_to_likes = 0.15f; // 15%
+         // this account gets the rest
+
+         int64_t distribute( asset quantity );
+
    };
 
 } /// namespace eosio
