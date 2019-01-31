@@ -5,6 +5,7 @@
 
 #include <is.protocoin/is.protocoin.hpp>
 #include <eosiolib/transaction.hpp>
+#include <math.h> /* exp */
 
 namespace eosio {
 
@@ -21,9 +22,14 @@ void token::create( asset  maximum_supply )
     auto existing = statstable.find( sym.code().raw() );
     eosio_assert( existing == statstable.end(), "token with symbol already exists" );
 
+    eosio::time_point_sec current_time = eosio::time_point_sec(now());
+
     statstable.emplace( _self, [&]( auto& s ) {
        s.supply.symbol = maximum_supply.symbol;
        s.max_supply    = maximum_supply;
+       s.created       = current_time;
+       s.updated       = current_time;
+       s.boosts        = 0;
     });
 
     const int64_t issue_amount = (int64_t)(maximum_supply.amount * ISSUE_PROPORTION);
@@ -194,10 +200,28 @@ void token::addstake( name         staker,
    }
 }
 
-void token::updatestakes( const symbol& symbol ) {
+void token::update( const symbol& symbol ) {
    require_auth( _self );
 
-   eosio::print("Updating stakes\n");
+   eosio::print("Updating\n");
+
+   eosio_assert( symbol.is_valid(), "invalid symbol name" );
+
+   update_stakes(symbol);
+   update_boost(symbol);
+
+   // schedule a transaction to do it again
+   eosio::transaction out;
+   out.actions.emplace_back(
+      permission_level{_self, "active"_n},
+      _self,
+      "update"_n,
+      std::make_tuple(symbol));
+   out.delay_sec = update_interval;
+   out.send(_self.value + now(), _self); // needs a unique sender id so append current time
+}
+
+void token::update_stakes( const symbol& symbol ) {
 
    stake_stats stake_stats_table( _self, symbol.code().raw() );
 
@@ -249,18 +273,64 @@ void token::updatestakes( const symbol& symbol ) {
          ++iterator;
       }
    }
-
-   // schedule a transaction to do it again
-   eosio::transaction out;
-   out.actions.emplace_back(
-      permission_level{_self, "active"_n},
-      _self,
-      "updatestakes"_n,
-      std::make_tuple(symbol));
-   out.delay_sec = update_interval;
-   out.send(_self.value + now(), _self); // needs a unique sender id so append current time
 }
 
+
+void token::update_boost( const symbol& symbol ) {
+   require_auth( _self );
+
+   eosio::print("Updating boost.\n");
+
+   stats statstable( _self, symbol.code().raw() );
+   auto existing = statstable.find( symbol.code().raw() );
+   eosio_assert( existing != statstable.end(), "token with symbol does not exist." );
+   const auto& st = *existing;
+
+   const eosio::time_point_sec current_time(now());
+   eosio::print("Current time:", current_time.sec_since_epoch(), "\n");
+
+   const uint16_t next_boost = st.boosts + 1;
+   eosio::print("Current boost:", (uint32_t)st.boosts, "\n");
+   eosio::print("Next boost:", (uint32_t)next_boost, "\n");
+
+   if (next_boost > boost_count) {
+      // no more boosts
+      return;
+   }
+
+   const eosio::time_point_sec next_boost_time = st.created + next_boost * boost_interval;
+   eosio::print("Next boost time:", next_boost_time.sec_since_epoch(), "\n");
+
+   if (next_boost_time <= current_time) {
+      // it's time for the next boost
+
+      const int64_t total_boost = (int64_t)(boost_proportion() * st.max_supply.amount);
+      eosio::print("Total boost:", total_boost, "\n");
+      const int64_t current_boost_amount = (exp(boost_lambda*next_boost)/boost_divisor) * total_boost;
+      eosio::print("Current boost:", current_boost_amount, "\n");
+      const asset current_boost_asset(current_boost_amount, symbol);
+
+      if ( st.supply.amount + current_boost_asset.amount > st.max_supply.amount) {
+         // not enough supply
+         return;
+      }
+
+      statstable.modify( st, same_payer, [&]( auto& s ) {
+         s.supply += current_boost_asset;
+         s.updated = current_time;
+         s.boosts = next_boost;
+      });
+
+      int64_t amount_distributed = distribute(current_boost_asset);
+      eosio::print("Amount distributed:", amount_distributed, "\n");
+      // give remainder to this account
+      int64_t remainder = current_boost_asset.amount - amount_distributed;
+      eosio::print("Remainder:", remainder, "\n");
+      if (remainder > 0) {
+         add_balance( _self, asset(remainder, symbol), _self);
+      }
+   }
+}
 
 asset token::get_stake( name staker, const symbol& symbol )const
 {
@@ -298,6 +368,8 @@ asset token::get_unstaked_balance( name owner, const symbol& symbol )const
 // returns the actual amount distruted.
 int64_t token::distribute( asset quantity )
 {
+   eosio::print("Distributing:", quantity.amount, "\n");
+
    stake_stats stake_stats_table( _self, quantity.symbol.code().raw() );
 
    std::vector<name>  stakers;
@@ -345,4 +417,4 @@ int64_t token::distribute( asset quantity )
 
 } /// namespace eosio
 
-EOSIO_DISPATCH( eosio::token, (create)(transfer)(open)(close)(addstake)(updatestakes) )
+EOSIO_DISPATCH( eosio::token, (create)(transfer)(open)(close)(addstake)(update) )

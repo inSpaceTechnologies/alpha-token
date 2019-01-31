@@ -45,7 +45,7 @@ namespace eosio {
                         uint32_t     duration );
 
          [[eosio::action]]
-         void updatestakes( const symbol& symbol );
+         void update( const symbol& symbol );
 
          static asset get_supply( name token_contract_account, symbol_code sym_code )
          {
@@ -69,8 +69,11 @@ namespace eosio {
          };
 
          struct [[eosio::table]] currency_stats {
-            asset    supply;
-            asset    max_supply;
+            asset                   supply;
+            asset                   max_supply;
+            eosio::time_point_sec   created;
+            eosio::time_point_sec   updated;
+            uint16_t                boosts; // number of boosts so far
 
             uint64_t primary_key()const { return supply.symbol.code().raw(); }
          };
@@ -101,8 +104,17 @@ namespace eosio {
          void sub_balance( name owner, asset value );
          void add_balance( name owner, asset value, name ram_payer );
 
-         // constants
-         const float ISSUE_PROPORTION = 0.75; // remainder used for boost
+         void update_stakes( const symbol& symbol );
+         void update_boost( const symbol& symbol );
+         const uint32_t update_interval = ONE_MINUTE;
+
+         // distribution
+
+         const float ISSUE_PROPORTION = 0.75f; // remainder used for boost
+         inline float boost_proportion()
+         {
+            return 1.0f - ISSUE_PROPORTION;
+         }
 
          // staking
 
@@ -116,7 +128,6 @@ namespace eosio {
             180 * ONE_MINUTE,
             360  * ONE_MINUTE
          };
-         const uint32_t update_interval = ONE_MINUTE;
 
          const int64_t stake_weights[stake_count] = {
             0,
@@ -147,6 +158,13 @@ namespace eosio {
          // this account gets the rest
 
          int64_t distribute( asset quantity );
+
+         // boost
+         // TODO: change to weekly
+         const uint32_t boost_interval = ONE_MINUTE * 2;
+         const uint16_t boost_count = 312; // total number of boosts
+         const float    boost_lambda = -0.015f;
+         const float    boost_divisor = 66.0f;
 
    };
 
