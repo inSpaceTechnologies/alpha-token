@@ -3,7 +3,7 @@
  *  @copyright defined in eos/LICENSE.txt
  */
 
-#include <is.protocoin/is.protocoin.hpp>
+#include <iscoinalpha1/iscoinalpha1.hpp>
 #include <eosiolib/transaction.hpp>
 #include <math.h> /* exp */
 
@@ -159,10 +159,12 @@ void token::close( name owner, const symbol& symbol )
 
 void token::addstake( name         staker,
                       asset        quantity,
-                      uint32_t     duration )
+                      size_t       duration_index )
 {
     require_auth( staker );
     eosio_assert( is_account( staker ), "staker account does not exist");
+
+    eosio_assert( duration_index < stake_count, "duration_index out of bounds");
 
     stats statstable( _self, quantity.symbol.code().raw() );
     const auto& st = statstable.get( quantity.symbol.code().raw() );
@@ -179,10 +181,10 @@ void token::addstake( name         staker,
       s.id = staker_stakes.available_primary_key();
       s.quantity = quantity;
       s.start = eosio::time_point_sec(now());
-      s.duration = duration;
+      s.duration_index = duration_index;
    });
 
-   int64_t weight = stake_weight(duration) * quantity.amount;
+   int64_t weight = stake_weights[duration_index];
 
    stake_stats stake_stats_table( _self, quantity.symbol.code().raw() );
    const auto staker_stake_stats = stake_stats_table.find( staker.value );
@@ -246,14 +248,15 @@ void token::update_stakes( const symbol& symbol ) {
             ++stake_iterator;
             continue;
          }
-         const eosio::time_point_sec expiryTime = stk.start + stk.duration;
+         const uint32_t duration = stake_durations[stk.duration_index];
+         const eosio::time_point_sec expiryTime = stk.start + duration;
          if (expiryTime <= currentTime) {
             // stake has expired. remove it.
             stake_iterator = stakestable.erase(stake_iterator);
          } else {
             total_stake.amount += stk.quantity.amount;
 
-            int64_t weight = stake_weight(stk.duration) * stk.quantity.amount;
+            int64_t weight = stake_weights[stk.duration_index] * stk.quantity.amount;
             this_stake_weight += weight;
 
             ++stake_iterator;

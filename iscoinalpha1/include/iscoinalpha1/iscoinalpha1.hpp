@@ -20,7 +20,7 @@ namespace eosio {
 
    using std::string;
 
-   class [[eosio::contract("is.protocoin")]] token : public contract {
+   class [[eosio::contract("iscoinalpha1")]] token : public contract {
       public:
          using contract::contract;
 
@@ -40,9 +40,9 @@ namespace eosio {
          void close( name owner, const symbol& symbol );
 
          [[eosio::action]]
-         void addstake( name staker,
-                        asset        quantity,
-                        uint32_t     duration );
+         void addstake( name     staker,
+                        asset    quantity,
+                        size_t   duration_index );
 
          [[eosio::action]]
          void update( const symbol& symbol );
@@ -82,7 +82,7 @@ namespace eosio {
             uint64_t                id; // use available_primary_key() to generate
             asset                   quantity;
             eosio::time_point_sec   start;
-            uint32_t                duration;
+            size_t                  duration_index;
 
             uint64_t primary_key()const { return id; }
          };
@@ -118,33 +118,25 @@ namespace eosio {
 
          // staking
 
-         static const size_t stake_count = 5;
+         static const size_t stake_count = 6;
          // short durations for testing
-         // TODO: change to days, not minutes
+         // TODO: change to months, not minutes
          const uint32_t stake_durations[stake_count] = {
-            0,
-            30 * ONE_MINUTE,
-            90 * ONE_MINUTE,
-            180 * ONE_MINUTE,
-            360  * ONE_MINUTE
+            1 * ONE_MINUTE, // 1 month
+            3 * ONE_MINUTE, // 2 months
+            6 * ONE_MINUTE, // 6 months
+            12  * ONE_MINUTE, // 1 year
+            12 * 2  * ONE_MINUTE, // 2 years
+            12 * 5 * ONE_MINUTE, // 5 years
          };
-
          const int64_t stake_weights[stake_count] = {
-            0,
-            5,
-            6,
-            7,
-            10
+            50,
+            60,
+            75,
+            100,
+            100,
+            100,
          };
-
-         inline int64_t stake_weight( uint32_t stake_duration )
-         {
-            size_t i = 0;
-            while ((i+1) < stake_count && stake_duration >= stake_durations[i+1]) {
-               i = i+1;
-            }
-            return stake_weights[i];
-         }
 
          asset get_stake( name owner, const symbol& symbol )const;
          int64_t get_stake_weight( name owner, const symbol& symbol )const;
