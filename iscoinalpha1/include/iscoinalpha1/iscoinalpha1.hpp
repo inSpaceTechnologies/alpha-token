@@ -34,6 +34,13 @@ namespace eosio {
                         string  memo );
 
          [[eosio::action]]
+         void transferstkd( name    from,
+                            name    to,
+                            asset   quantity,
+                            string  memo,
+                            size_t   duration_index );
+
+         [[eosio::action]]
          void open( name owner, const symbol& symbol, name ram_payer );
 
          [[eosio::action]]
@@ -103,6 +110,10 @@ namespace eosio {
          void issue( asset quantity );
          void sub_balance( name owner, asset value );
          void add_balance( name owner, asset value, name ram_payer );
+
+         void add_stake( name     staker,
+                        asset    quantity,
+                        size_t   duration_index );
 
          void update_stakes( const symbol& symbol );
          void update_boost( const symbol& symbol );

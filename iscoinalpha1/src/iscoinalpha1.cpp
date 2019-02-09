@@ -62,6 +62,19 @@ void token::transfer( name    from,
     add_balance( to, quantity, payer );
 }
 
+void token::transferstkd( name    from,
+                   name    to,
+                   asset   quantity,
+                   string  memo,
+                   size_t   duration_index )
+{
+   SEND_INLINE_ACTION( *this, transfer, { {from, "active"_n} },
+                       { from, to, quantity, memo }
+   );
+   // can't use the addstake action, because we don't have the authority
+   add_stake(to, quantity, duration_index);
+}
+
 void token::issue( asset quantity )
 {
     auto sym = quantity.symbol;
@@ -162,6 +175,13 @@ void token::addstake( name         staker,
                       size_t       duration_index )
 {
     require_auth( staker );
+    add_stake(staker, quantity, duration_index);
+}
+
+void token::add_stake( name         staker,
+                      asset        quantity,
+                      size_t       duration_index )
+{
     eosio_assert( is_account( staker ), "staker account does not exist");
 
     eosio_assert( duration_index < stake_count, "duration_index out of bounds");
@@ -420,4 +440,4 @@ int64_t token::distribute( asset quantity )
 
 } /// namespace eosio
 
-EOSIO_DISPATCH( eosio::token, (create)(transfer)(open)(close)(addstake)(update) )
+EOSIO_DISPATCH( eosio::token, (create)(transfer)(transferstkd)(open)(close)(addstake)(update) )
